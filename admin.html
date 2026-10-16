@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>SpaceAntGalaxy · Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head><body>
+<canvas id="stars"></canvas><div id="app"></div>
+<script type="module">
+import {auth,A,$,esc,fmt,ld,gd,sv,getCfg,stars}from'./firebase.js';
+let isAdmin=false,cfg={},msg='';const DAY=864e5;
+const nav=()=>`<nav><span class="brand">SpaceAntGalaxy · Admin</span>${isAdmin?'<a onclick="out()">Sign out</a>':''}</nav>`;
+async function render(){const a=$('#app');let b;
+ if(!isAdmin)b=`<div class="box card"><h2>Admin sign in</h2><label>Email</label><input id="e" type="email"><label>Password</label><input id="p" type="password"><button onclick="inn()">Enter</button></div>`;
+ else{a.innerHTML=nav()+'<p class="mut">Loading…</p>';const us=await ld('users'),sh=await ld('shops'),pay=(await ld('payments')).filter(x=>!x.done),rp=await ld('reports');
+ b=`<div class="card"><h3>Subscriptions</h3><div class="row"><b>${cfg.subOn?'ON':'OFF'}</b><button onclick="cf({subOn:${!cfg.subOn}})">Turn ${cfg.subOn?'off':'on'}</button></div><label>Monthly price (₦)</label><input id="cp" type="number" value="${cfg.price}"><label>Account details owners pay into</label><textarea id="cb">${esc(cfg.bank)}</textarea><button onclick="cf({price:+$('#cp').value,bank:$('#cb').value})">Save</button></div>
+ <h3>Payment confirmations</h3>${pay.map(p=>`<div class="card row"><span>${esc(p.name)} — ${esc(p.ref)}</span><button onclick="appr('${p.id}')">Approve 30 days</button></div>`).join('')||'<p class="mut">None pending.</p>'}
+ <h3>Shops</h3>${sh.map(s=>`<div class="card row"><span>${esc(s.name)} <span class="pill">${rp.filter(r=>r.shopId===s.id).length} fraud reports</span></span><button class="${s.banned?'g':'d'}" onclick="ban('shops','${s.id}',${!s.banned})">${s.banned?'Unban':'Ban'}</button></div>`).join('')||'<p class="mut">No shops.</p>'}
+ <h3>Accounts</h3>${us.map(u=>`<div class="card row"><span>${esc(u.name)} · ${u.role} · ${esc(u.email)}</span><button class="${u.banned?'g':'d'}" onclick="ban('users','${u.id}',${!u.banned})">${u.banned?'Unban':'Ban'}</button></div>`).join('')}`}
+ a.innerHTML=nav()+(msg?`<div class="err">${esc(msg)}</div>`:'')+b}
+async function inn(){try{await A.signInWithEmailAndPassword(auth,$('#e').value.trim(),$('#p').value)}catch(e){msg='Sign-in failed.';render()}}
+const out=()=>A.signOut(auth);
+async function cf(o){cfg={...cfg,...o,id:'site'};await sv('config',cfg);msg='Saved — live on the site.';render()}
+async function ban(c,id,v){const x=await gd(c,id);x.banned=v;await sv(c,x);render()}
+async function appr(id){const p=await gd('payments',id),u=await gd('users',p.ownerId);u.paidUntil=Math.max(Date.now(),u.paidUntil||0)+30*DAY;await sv('users',u);p.done=true;await sv('payments',p);for(const s of await ld('shops','ownerId',u.id)){s.paidUntil=u.paidUntil;await sv('shops',s)}render()}
+Object.assign(window,{inn,out,cf,ban,appr});
+stars();
+A.onAuthStateChanged(auth,async u=>{isAdmin=false;if(u){try{isAdmin=!!(await gd('admins',u.uid))}catch(e){}if(!isAdmin){msg='This account is not an admin.';await A.signOut(auth)}else cfg=await getCfg()}render()});
+</script></body></html>

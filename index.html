@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpaceAntGalaxy</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head><body>
+<div id="app"></div>
+<script type="module">
+import {auth,A,$,esc,fmt,ld,gd,sv,rm,getCfg}from'./firebase.js';
+let me=null,V={p:'home'},cfg={},msg='',mode='customer',reg=false,cart={shop:null,items:[]},TAB='products',ED=null,SHOP=null,PSmap={};
+const IM={prod:[],cover:[]},THEMES=['champagne','onyx','rose','emerald'];
+try{cart=JSON.parse(sessionStorage.getItem('c'))||cart}catch(e){}
+const save=()=>{try{sessionStorage.setItem('c',JSON.stringify(cart))}catch(e){}};
+const safe=u=>/^(https?:|data:image\/)/i.test(u||'')?u:'';
+const go=(p,id)=>{V={p,id};msg='';render();scrollTo(0,0)};
+const setMode=m=>{mode=m;render()},togReg=()=>{reg=!reg;render()};
+const out=async()=>{await A.signOut(auth);cart={shop:null,items:[]};save();me=null;go('home')};
+const nav=()=>`<nav><span class="brand" onclick="go('home')">SpaceAntGalaxy</span><div><a onclick="go('home')">Shops</a>${me?.role==='customer'?`<a onclick="go('cart')">Cart (${cart.items.reduce((a,i)=>a+i.q,0)})</a><a onclick="go('orders')">My orders</a>`:''}${me?.role==='owner'?`<a onclick="go('dash')">My shop</a>`:''}${me?`<a onclick="out()">Sign out</a>`:`<a onclick="go('login')">Sign in</a>`}</div></nav>`;
+async function render(){const a=$('#app');a.innerHTML=nav()+'<p class="mut">Loading…</p>';let b;try{b=await({home,login,shop,cart:cartV,orders,dash}[V.p])()}catch(e){console.error(e);b='<p class="err">Something went wrong: '+esc(e.code||e.message)+'</p>'}a.innerHTML=nav()+(msg?`<div class="err">${esc(msg)}</div>`:'')+b}
+const stars5=r=>{r=Math.round(r);return'<span class="star">'+'★'.repeat(r)+'☆'.repeat(5-r)+'</span>'};
+async function avg(id){const rv=await ld('reviews','shopId',id);return{n:rv.length,a:rv.length?rv.reduce((s,x)=>s+x.rating,0)/rv.length:0,rv}}
+const live=s=>!s.banned&&(!cfg.subOn||s.paidUntil>Date.now());
+async function home(){const sh=(await ld('shops')).filter(live);let c='';for(const s of sh){const r=await avg(s.id);c+=`<div class="card click" onclick="go('shop','${s.id}')"><div class="cv" style="${safe(s.cover)?`background-image:url('${esc(safe(s.cover))}')`:''}"></div><div class="cb"><h3>${esc(s.name)}</h3><p class="mut">${esc(s.desc)}</p>${r.n?stars5(r.a)+` <span class="mut">(${r.n})</span>`:'<span class="mut">No reviews yet</span>'}</div></div>`}
+ return`<div class="hero"><h1>SpaceAntGalaxy</h1><p>Discover independent luxury shops. Browse, order, and pay on delivery.</p></div><h2>Shops</h2><div class="grid">${c||'<p class="mut">No shops are open yet.</p>'}</div>`}
+const login=()=>`<div class="box card"><h2>${reg?'Create account':'Sign in'}</h2><div class="tabs"><button class="${mode=='customer'?'on':''}" onclick="setMode('customer')">Customer</button><button class="${mode=='owner'?'on':''}" onclick="setMode('owner')">Shop owner</button></div>${mode=='owner'&&reg?'<p class="mut">Create your account, then open your shop in minutes.</p>':''}${reg?'<label>Name</label><input id="n">':''}<label>Email</label><input id="e" type="email"><label>Password</label><input id="p" type="password"><button onclick="doAuth()">${reg?'Register':'Enter'}</button> <button class="g" onclick="togReg()">${reg?'Have an account':'New here'}</button></div>`;
+async function doAuth(){const e=$('#e').value.trim(),p=$('#p').value,n=$('#n')?.value.trim();if(!e||p.length<6){msg='Enter email and a password of 6+ characters.';return render()}
+ try{if(reg){if(!n){msg='Enter your name.';return render()}const c=await A.createUserWithEmailAndPassword(auth,e,p);me=await sv('users',{id:c.user.uid,name:n,email:e,role:mode,banned:false})}
+ else{const c=await A.signInWithEmailAndPassword(auth,e,p),u=await gd('users',c.user.uid);if(!u||u.role!==mode||u.banned){await A.signOut(auth);msg=u?.banned?'This account has been banned.':'Wrong account type for this tab.';return render()}me=u}}
+ catch(x){msg=x.code==='auth/email-already-in-use'?'Email already registered.':'Could not sign in: check your details.';return render()}
+ go(me.role==='owner'?'dash':'home')}
+const pimg=p=>safe(p.images?.[0])?`<img src="${esc(safe(p.images[0]))}" loading="lazy">`:'◆';
+const pc=(p,buy)=>`<div class="pc"><div class="pimg" onclick="openP('${p.id}')">${pimg(p)}</div><div class="pb"><b>${esc(p.name)}</b><div class="row"><span class="pr">${fmt(p.price)}</span>${buy?`<button onclick="add('${p.shopId}','${p.id}')">Add</button>`:''}</div></div></div>`;
+async function shop(){const s=await gd('shops',V.id);if(!s||s.banned)return'<p>Shop unavailable.</p>';const mine=me?.id===s.ownerId;
+ if(!live(s)&&!mine)return'<div class="card"><h2>Shop temporarily closed</h2><p class="mut">This shop is not available right now.</p></div>';
+ const ps=await ld('products','shopId',s.id),r=await avg(s.id);ps.forEach(p=>PSmap[p.id]=p);const buy=me?.role==='customer';
+ return`<div class="shopwrap t-${esc(s.theme)}">${!live(s)?'<div class="err">Only you can see this shop. It opens to customers once your subscription is confirmed.</div>':''}<div class="shophead ${safe(s.cover)?'cv':''}" style="${safe(s.cover)?`background-image:linear-gradient(#0004,#0007),url('${esc(safe(s.cover))}')`:''}"><h1>${esc(s.name)}</h1><p class="${safe(s.cover)?'':'mut'}">${esc(s.desc)}</p>${r.n?stars5(r.a)+` ${r.a.toFixed(1)} (${r.n})`:'<span class="mut">No reviews yet</span>'}</div>
+ <h2>Products</h2><div class="pgrid">${ps.map(p=>pc(p,buy)).join('')||'<p class="mut">No products yet.</p>'}</div>${!buy?'<p class="mut">Sign in as a customer to order.</p>':''}
+ <h2>Reviews</h2>${r.rv.map(x=>`<div class="card">${stars5(x.rating)} <b>${esc(x.name)}</b><p>${esc(x.text)}</p></div>`).join('')||'<p class="mut">Be the first to review.</p>'}
+ ${buy?`<div class="card"><h3>Rate this shop</h3><select id="rt">${[5,4,3,2,1].map(i=>`<option>${i}</option>`).join('')}</select><textarea id="rx" placeholder="Your review"></textarea><div class="row"><button onclick="rev('${s.id}')">Submit review</button><button class="g" onclick="rep('${s.id}')">Report fraud</button></div></div>`:''}</div>`}
+function openP(id){const p=PSmap[id],im=(p.images||[]).map(safe).filter(Boolean),m=document.createElement('div');m.className='modal';m.onclick=e=>{if(e.target===m)m.remove()};
+ m.innerHTML=`<div class="mbox"><b class="x" onclick="this.closest('.modal').remove()">×</b>${im.length?`<div class="mimg"><img id="mi" src="${esc(im[0])}"></div><div class="mth">${im.map(u=>`<img src="${esc(u)}" onclick="document.getElementById('mi').src=this.src">`).join('')}</div>`:''}<h2>${esc(p.name)}</h2><b class="pr">${fmt(p.price)}</b><p style="white-space:pre-wrap">${esc(p.desc)}</p>${me?.role==='customer'?`<button onclick="add('${p.shopId}','${p.id}');this.closest('.modal').remove()">Add to cart</button>`:''}</div>`;document.body.appendChild(m)}
+const rev=async id=>{await sv('reviews',{shopId:id,uid:me.id,name:me.name,rating:+$('#rt').value,text:$('#rx').value.trim(),ts:Date.now()});render()};
+const rep=async id=>{await sv('reports',{shopId:id,by:me.id,ts:Date.now()});msg='Report sent to the admin.';render()};
+function add(sid,pid){const p=PSmap[pid];if(cart.shop&&cart.shop!==sid)cart.items=[];cart.shop=sid;const i=cart.items.find(x=>x.id===pid);i?i.q++:cart.items.push({id:pid,name:p.name,price:p.price,q:1,ownerId:p.ownerId});save();msg='Added to cart.';render()}
+const rmItem=k=>{cart.items.splice(k,1);save();render()};
+async function cartV(){if(!cart.items.length)return'<h2>Your cart</h2><p class="mut">Empty.</p>';const t=cart.items.reduce((a,i)=>a+i.price*i.q,0);
+ return`<h2>Your cart</h2>${cart.items.map((i,k)=>`<div class="card row"><span>${esc(i.name)} × ${i.q}</span><span>${fmt(i.price*i.q)} <button class="g" onclick="rmItem(${k})">Remove</button></span></div>`).join('')}<h3>Total ${fmt(t)} <span class="mut">· pay the shop on delivery</span></h3><label>Delivery address</label><textarea id="ad"></textarea><label>Phone</label><input id="ph"><button onclick="order(${t})">Place order</button>`}
+async function order(t){const ad=$('#ad').value.trim(),ph=$('#ph').value.trim();if(!ad||!ph){msg='Add address and phone.';return render()}
+ await sv('orders',{shopId:cart.shop,ownerId:cart.items[0].ownerId,cid:me.id,cname:me.name,items:cart.items,total:t,address:ad,phone:ph,status:'New',ts:Date.now()});cart={shop:null,items:[]};save();go('orders');msg='Order placed! Pay on delivery.'}
+async function orders(){const o=(await ld('orders','cid',me?.id)).sort((a,b)=>b.ts-a.ts);return`<h2>My orders</h2>${o.map(x=>`<div class="card"><span class="pill">${x.status}</span> ${fmt(x.total)}<p class="mut">${x.items.map(i=>esc(i.name)+'×'+i.q).join(', ')}</p></div>`).join('')||'<p class="mut">None yet.</p>'}`}
+/* ---------- shop owner ---------- */
+const thumbs=k=>IM[k].map((s,i)=>`<div class="th"><img src="${esc(safe(s))}"><b onclick="delImg('${k}',${i})">×</b></div>`).join('');
+const picker=(k,max)=>`<div class="thumbs" id="th_${k}">${thumbs(k)}</div><label>Upload photo${max>1?'s (up to '+max+')':''}</label><input type="file" accept="image/*" ${max>1?'multiple':''} onchange="upl('${k}',this,${max})"><label>…or paste a photo URL</label><div class="row" style="flex-wrap:nowrap"><input id="url_${k}" placeholder="https://…"><button class="g" style="margin-bottom:12px" onclick="addUrl('${k}',${max})">Add</button></div>`;
+const redraw=k=>{$('#th_'+k).innerHTML=thumbs(k)};
+async function shrink(f){const b=await createImageBitmap(f),k=Math.min(1,700/Math.max(b.width,b.height)),c=document.createElement('canvas');c.width=b.width*k;c.height=b.height*k;c.getContext('2d').drawImage(b,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.72)}
+async function upl(k,el,max){for(const f of el.files){if(IM[k].length>=max){msg='Maximum '+max+' photo(s).';break}try{IM[k].push(await shrink(f))}catch(e){msg='Could not read that image.'}}el.value='';redraw(k)}
+function addUrl(k,max){const u=$('#url_'+k).value.trim();if(!safe(u)){alert('Paste a full link starting with https://');return}if(IM[k].length>=max)return alert('Maximum '+max+' photo(s).');IM[k].push(u);$('#url_'+k).value='';redraw(k)}
+const delImg=(k,i)=>{IM[k].splice(i,1);redraw(k)};
+const setTab=t=>{TAB=t;ED=null;IM.prod=[];if(t==='settings')IM.cover=SHOP.cover?[SHOP.cover]:[];render()};
+function payCard(pm){return`<div class="card"><h3>Monthly subscription: ${fmt(cfg.price)}</h3><p>1. Transfer ${fmt(cfg.price)} to this account:</p><p class="pill" style="display:block;border-radius:10px;white-space:pre-wrap;padding:10px">${esc(cfg.bank)||'Payment details not set yet.'}</p><p>2. ${pm?'<b>Payment submitted — your shop opens as soon as the admin confirms.</b>':'Enter your payment name/reference and tap “I have paid”. Your shop opens as soon as it is confirmed.'}</p>${pm?'':'<input id="rf" placeholder="Payment reference / sender name"><button onclick="paid()">I have paid</button>'}</div>`}
+async function dash(){if(me?.role!=='owner')return'<p>Owner access only.</p>';me=await gd('users',me.id);SHOP=(await ld('shops','ownerId',me.id))[0];
+ if(!SHOP)return`<div class="box card"><h2>Open your shop</h2><p class="mut">Just a name and a look. You can add products right after.</p><label>Shop name</label><input id="sn" placeholder="e.g. Amina’s Boutique"><label>Short description</label><textarea id="sd" placeholder="What do you sell?"></textarea><label>Shop look</label><select id="st">${THEMES.map(t=>`<option>${t}</option>`).join('')}</select><button onclick="mk()">Open my shop</button></div>`;
+ const s=SHOP,ok=!cfg.subOn||s.paidUntil>Date.now(),pm=(await ld('payments','ownerId',me.id)).find(x=>!x.done),tabs=[['products','Products'],['orders','Orders'],['settings','Shop settings'],...(cfg.subOn?[['sub','Subscription']]:[])];
+ let body='';
+ if(TAB==='products'){const ps=await ld('products','shopId',s.id);ps.forEach(p=>PSmap[p.id]=p);const e=ED||{};
+  body=`<div class="card" id="pf"><h3>${e.id?'Edit product':'Add a product'}</h3><label>Product name</label><input id="pn" value="${esc(e.name)}"><label>Price (₦)</label><input id="pp" type="number" value="${esc(e.price)}"><label>Details / description</label><textarea id="pd" rows="4">${esc(e.desc)}</textarea>${picker('prod',4)}<button onclick="saveP()">${e.id?'Save changes':'Add product'}</button> ${e.id?'<button class="g" onclick="setTab(\'products\')">Cancel</button>':''}</div><div class="pgrid">${ps.map(p=>`<div>${pc(p,false)}<div class="row" style="margin-top:6px"><button class="g" onclick="editP('${p.id}')">Edit</button><button class="g" onclick="delP('${p.id}')">Delete</button></div></div>`).join('')}</div>${ps.length?'':'<p class="mut">No products yet — add your first one above.</p>'}`}
+ if(TAB==='orders'){const os=(await ld('orders','ownerId',me.id)).sort((a,b)=>b.ts-a.ts);body=os.map(o=>`<div class="card"><div class="row"><b>${esc(o.cname)} · ${fmt(o.total)}</b><select style="width:auto" onchange="stt('${o.id}',this.value)">${['New','Packed','Sent','Delivered','Cancelled'].map(x=>`<option ${x==o.status?'selected':''}>${x}</option>`).join('')}</select></div><p class="mut">${o.items.map(i=>esc(i.name)+'×'+i.q).join(', ')}<br>${esc(o.address)} · ${esc(o.phone)}</p></div>`).join('')||'<p class="mut">No orders yet.</p>'}
+ if(TAB==='settings')body=`<div class="card"><label>Shop name</label><input id="sn" value="${esc(s.name)}"><label>Description</label><textarea id="sd">${esc(s.desc)}</textarea><label>Shop look</label><select id="st">${THEMES.map(t=>`<option ${t==s.theme?'selected':''}>${t}</option>`).join('')}</select><h3>Cover photo</h3>${picker('cover',1)}<button onclick="saveShop()">Save shop</button></div>`;
+ if(TAB==='sub')body=payCard(pm)+`<p class="mut">${ok?'Active until '+new Date(s.paidUntil).toDateString():'Not active'}</p>`;
+ return`<div class="row"><div><h1>${esc(s.name)}</h1><span class="pill">${!cfg.subOn?'Open · subscriptions off':ok?'Open until '+new Date(s.paidUntil).toDateString():'Closed to customers'}</span></div><button class="g" onclick="go('shop','${s.id}')">View my shop</button></div>${!ok&&TAB!=='sub'?payCard(pm):''}<div class="tabs">${tabs.map(([k,n])=>`<button class="${TAB==k?'on':''}" onclick="setTab('${k}')">${n}</button>`).join('')}</div>${body}`}
+const paid=async()=>{await sv('payments',{ownerId:me.id,name:me.name,ref:$('#rf').value.trim(),ts:Date.now(),done:false});msg='Payment submitted.';render()};
+async function mk(){const n=$('#sn').value.trim();if(!n){msg='Name your shop.';return render()}await sv('shops',{ownerId:me.id,name:n,desc:$('#sd').value.trim(),theme:$('#st').value,cover:'',paidUntil:me.paidUntil||0,banned:false});msg=cfg.subOn&&!(me.paidUntil>Date.now())?'Shop created! Add products now. It opens to customers once your subscription is confirmed.':'Shop created! Add your first product.';render()}
+async function saveShop(){await sv('shops',{...SHOP,name:$('#sn').value.trim()||SHOP.name,desc:$('#sd').value.trim(),theme:$('#st').value,cover:IM.cover[0]||''});msg='Shop saved.';TAB='products';render()}
+async function saveP(){const n=$('#pn').value.trim();if(!n){msg='Give the product a name.';return render()}await sv('products',{id:ED?.id,shopId:SHOP.id,ownerId:me.id,name:n,price:+$('#pp').value||0,desc:$('#pd').value.trim(),images:IM.prod});msg=ED?.id?'Product updated.':'Product added.';ED=null;IM.prod=[];render()}
+async function editP(id){ED=PSmap[id];IM.prod=[...(ED.images||[])];await render();$('#pf')?.scrollIntoView()}
+const delP=async id=>{if(confirm('Delete this product?')){await rm('products',id);render()}};
+const stt=async(id,v)=>{const o=(await ld('orders','ownerId',me.id)).find(x=>x.id===id);o.status=v;await sv('orders',o)};
+Object.assign(window,{go,out,setMode,togReg,doAuth,rev,rep,add,rmItem,order,paid,mk,saveShop,saveP,editP,delP,stt,openP,upl,addUrl,delImg,setTab});
+cfg=await getCfg();
+A.onAuthStateChanged(auth,async u=>{me=null;if(u){const d=await gd('users',u.uid);if(d&&!d.banned)me=d}render()});
+</script></body></html>
